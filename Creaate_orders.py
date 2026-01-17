@@ -26,11 +26,19 @@ SPREADSHEET_ID = "10t158B1ZDa2UkuPimTcrVeuK8d7ccC71Btv7GIK3an4"
 RANGE = "Sheet1!B5:N22"  # підлаштуйте під вашу таблицю
 
 # Текстові блоки, які вставляємо у кожен документ (послідовно)
-FILE_LIST = ["top_text.txt", "extra_text.txt", "bottom_text.txt"]
+# FILE_LIST = ["top_text.txt", "extra_text.txt", "bottom_text.txt"]
+
+TOP_FILE = "top_text.txt"
+BOTTOM_FILE = "bottom_text.txt"
+
+FILE_FROM_1 = "first_duty_pair.txt"  # 1,4,7,10...
+FILE_FROM_2 = "second__duty_pair.txt"  # 2,5,8,11...
+FILE_FROM_3 = "third_duty_pair.txt"  # 3,6,9,12...
+
 
 # Діапазон дат (ВКЛЮЧНО)
-START_DATE_STR = "01.01.2026"
-END_DATE_STR   = "02.01.2026"
+START_DATE_STR = "03.01.2026"
+END_DATE_STR   = "06.01.2026"
 
 # Опціональні плейсхолдери
 ODR_IDX = "434дск"  # приклад
@@ -60,6 +68,18 @@ def daterange(start: date, end: date):
         yield cur
         cur = cur + timedelta(days=1)
 
+def build_file_list_for_date(cur_date: date) -> List[str]:
+    d = cur_date.day
+    r = (d - 1) % 3  # 0 для 1,4,7...; 1 для 2,5,8...; 2 для 3,6,9...
+
+    if r == 0:
+        mid = FILE_FROM_1
+    elif r == 1:
+        mid = FILE_FROM_2
+    else:
+        mid = FILE_FROM_3
+
+    return [TOP_FILE, mid, BOTTOM_FILE]
 
 def fetch_sheet_with_colors(sheets_service, spreadsheet_id: str, rng: str) -> Dict[str, Any]:
     """Раз зчитуємо діапазон із форматами (для кольорів)."""
@@ -260,12 +280,15 @@ def main():
         # 3.2) створюємо документ і наповнюємо
         title = cur_date.strftime("%Y-%m-%d")
         doc_id = create_doc(drive_service, docs_service, FOLDER_ID, title)
+        
+        file_list = build_file_list_for_date(cur_date)
+        print(f"Файли для {target_str}: {file_list}")  # опціонально, для контролю
 
         insert_files_with_replacements(
             docs_service=docs_service,
             doc_id=doc_id,
             target=cur_date,
-            file_list=FILE_LIST,
+            file_list=file_list, #FILE_LIST,
             odr_idx=ODR_IDX
         )
 
