@@ -31,14 +31,17 @@ RANGE = "Sheet1!B5:N22"  # підлаштуйте під вашу таблицю
 TOP_FILE = "top_text.txt"
 BOTTOM_FILE = "bottom_text.txt"
 
-FILE_FROM_1 = "first_duty_pair.txt"  # 1,4,7,10...
-FILE_FROM_2 = "second__duty_pair.txt"  # 2,5,8,11...
-FILE_FROM_3 = "third_duty_pair.txt"  # 3,6,9,12...
 
+FILE_FROM_1 = "first_duty_ksp.txt"  # 1,4,7,10...
+FILE_FROM_2 = "second_duty_ksp.txt"  # 2,5,8,11...
+FILE_FROM_3 = "third_duty_ksp.txt"  # 3,6,9,12...
+FILE_FROM_4 = "first_duty_drive.txt"  # 1,3,5...
+FILE_FROM_5 = "second_duty_drive.txt"  # 2,4,6...
+FILE_FROM_6 = "routs.txt"
 
 # Діапазон дат (ВКЛЮЧНО)
-START_DATE_STR = "03.01.2026"
-END_DATE_STR   = "06.01.2026"
+START_DATE_STR = "01.01.2026"
+END_DATE_STR   = "04.01.2026"
 
 # Опціональні плейсхолдери
 ODR_IDX = "434дск"  # приклад
@@ -71,15 +74,22 @@ def daterange(start: date, end: date):
 def build_file_list_for_date(cur_date: date) -> List[str]:
     d = cur_date.day
     r = (d - 1) % 3  # 0 для 1,4,7...; 1 для 2,5,8...; 2 для 3,6,9...
-
+    k = (d - 1) % 2  # 0 для 1,3,5...; 1 для 2,4,6...;
     if r == 0:
-        mid = FILE_FROM_1
+        duty_ksp = FILE_FROM_1
     elif r == 1:
-        mid = FILE_FROM_2
+        duty_ksp = FILE_FROM_2
     else:
-        mid = FILE_FROM_3
+        duty_ksp = FILE_FROM_3
 
-    return [TOP_FILE, mid, BOTTOM_FILE]
+    if k == 0:
+        duty_drive = FILE_FROM_4
+    else:
+        duty_drive = FILE_FROM_5
+    
+    routs = FILE_FROM_6
+    return [TOP_FILE, duty_ksp, duty_drive, routs, BOTTOM_FILE]
+
 
 def fetch_sheet_with_colors(sheets_service, spreadsheet_id: str, rng: str) -> Dict[str, Any]:
     """Раз зчитуємо діапазон із форматами (для кольорів)."""
