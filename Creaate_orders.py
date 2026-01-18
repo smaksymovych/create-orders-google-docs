@@ -1,5 +1,7 @@
 from __future__ import print_function
-import os, re
+
+import os
+import re
 from datetime import datetime, timedelta, date
 from typing import Optional, Dict, Any, List
 
@@ -9,7 +11,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-from google_colors import get_color_name  # ваш модуль з мапою кольорів
 
 # ====== НАЛАШТУВАННЯ ======
 SCOPES = [
@@ -18,30 +19,26 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
 
-OAUTH_FILE = "OAuth.json"            # ваш OAuth Client ID (Desktop) JSON
+OAUTH_FILE = "OAuth.json"  # ваш OAuth Client ID (Desktop) JSON
 TOKEN_FILE = "token.json"
 
-FOLDER_ID = "1VYgnyx44YCNwKVt1kftk0ydrpjOiVa5W"             # куди складати документи
+FOLDER_ID = "1VYgnyx44YCNwKVt1kftk0ydrpjOiVa5W"  # куди складати документи
 SPREADSHEET_ID = "10t158B1ZDa2UkuPimTcrVeuK8d7ccC71Btv7GIK3an4"
 RANGE = "Sheet1!B5:N22"  # підлаштуйте під вашу таблицю
-
-# Текстові блоки, які вставляємо у кожен документ (послідовно)
-# FILE_LIST = ["top_text.txt", "extra_text.txt", "bottom_text.txt"]
 
 TOP_FILE = "top_text.txt"
 BOTTOM_FILE = "bottom_text.txt"
 
-
-FILE_FROM_1 = "first_duty_ksp.txt"  # 1,4,7,10...
-FILE_FROM_2 = "second_duty_ksp.txt"  # 2,5,8,11...
-FILE_FROM_3 = "third_duty_ksp.txt"  # 3,6,9,12...
-FILE_FROM_4 = "first_duty_drive.txt"  # 1,3,5...
-FILE_FROM_5 = "second_duty_drive.txt"  # 2,4,6...
+FILE_FROM_1 = "first_duty_ksp.txt"      # 1,4,7,10...
+FILE_FROM_2 = "second_duty_ksp.txt"     # 2,5,8,11...
+FILE_FROM_3 = "third_duty_ksp.txt"      # 3,6,9,12...
+FILE_FROM_4 = "first_duty_drive.txt"    # 1,3,5...
+FILE_FROM_5 = "second_duty_drive.txt"   # 2,4,6...
 FILE_FROM_6 = "routs.txt"
 
 # Діапазон дат (ВКЛЮЧНО)
 START_DATE_STR = "01.01.2026"
-END_DATE_STR   = "04.01.2026"
+END_DATE_STR = "04.01.2026"
 
 # Опціональні плейсхолдери
 ODR_IDX = "434дск"  # приклад
@@ -71,10 +68,12 @@ def daterange(start: date, end: date):
         yield cur
         cur = cur + timedelta(days=1)
 
+
 def build_file_list_for_date(cur_date: date) -> List[str]:
     d = cur_date.day
     r = (d - 1) % 3  # 0 для 1,4,7...; 1 для 2,5,8...; 2 для 3,6,9...
     k = (d - 1) % 2  # 0 для 1,3,5...; 1 для 2,4,6...;
+
     if r == 0:
         duty_ksp = FILE_FROM_1
     elif r == 1:
@@ -86,13 +85,13 @@ def build_file_list_for_date(cur_date: date) -> List[str]:
         duty_drive = FILE_FROM_4
     else:
         duty_drive = FILE_FROM_5
-    
+
     routs = FILE_FROM_6
     return [TOP_FILE, duty_ksp, duty_drive, routs, BOTTOM_FILE]
 
 
-def fetch_sheet_with_colors(sheets_service, spreadsheet_id: str, rng: str) -> Dict[str, Any]:
-    """Раз зчитуємо діапазон із форматами (для кольорів)."""
+def fetch_sheet(sheets_service, spreadsheet_id: str, rng: str) -> Dict[str, Any]:
+    """Зчитуємо діапазон з gridData (для rowData/values), без використання кольорів."""
     return sheets_service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
         ranges=rng,
@@ -101,43 +100,28 @@ def fetch_sheet_with_colors(sheets_service, spreadsheet_id: str, rng: str) -> Di
 
 
 def find_date_col_index(rows: List[Dict[str, Any]], date_str: str) -> Optional[int]:
-    headers = [cell.get("formattedValue") for cell in rows[0]["values"]]
+    headers = [cell.get("formattedValue") for cell in rows[0].get("values", [])]
     try:
         return headers.index(date_str)
     except ValueError:
         return None
 
 
-def parse_cell(cell: Dict[str, Any]) -> Dict[str, Any]:
-    """Дістає сирий текст, парсить номер/дату та колір."""
-    text = cell.get("formattedValue", "")
-    bg = cell.get("effectiveFormat", {}).get("backgroundColor", {})
-    red = bg.get("red", 1)
-    green = bg.get("green", 1)
-    blue = bg.get("blue", 1)
-
+def parse_doc_from_text(text: str) -> Dict[str, Optional[str]]:
+    """Парсить 'номер від дата' з тексту клітинки."""
     doc_num, doc_date = None, None
-    m = re.search(r"(.+?) від (\d{2}\.\d{2}\.\d{4})", text)
+    m = re.search(r"(.+?) від (\d{2}\.\d{2}\.\d{4})", text or "")
     if m:
         doc_num = m.group(1).strip()
         doc_date = m.group(2)
-
-    return {
-        "raw": text,
-        "doc_num": doc_num,
-        "doc_date": doc_date,
-        "color_r": red, "color_g": green, "color_b": blue,
-        "color_name": get_color_name({"red": red, "green": green, "blue": blue})
-    }
+    return {"doc_num": doc_num, "doc_date": doc_date}
 
 
 def build_dataframe_for_date(rows: List[Dict[str, Any]], target_str: str) -> pd.DataFrame:
-    """На основі вже зчитаних rows готує DataFrame для однієї дати."""
+    """Готує DataFrame для однієї дати (без кольорів)."""
     col_idx = find_date_col_index(rows, target_str)
     if col_idx is None:
-        # Порожній DF, якщо дати в заголовку нема
-        return pd.DataFrame(columns=["position", "rank", "name", "doc_num", "doc_date",
-                                     "raw", "color_r", "color_g", "color_b", "color_name"])
+        return pd.DataFrame(columns=["position", "rank", "name", "doc_num", "doc_date", "raw"])
 
     records = []
     for row in rows[1:]:
@@ -145,22 +129,24 @@ def build_dataframe_for_date(rows: List[Dict[str, Any]], target_str: str) -> pd.
         if not values:
             continue
 
-        # A: посада, B: звання, C: ПІБ (бо у вашому B5:AH21 перший рядок — заголовок; далі: 0,1,2 — службові колонки)
+        # 0: посада, 1: звання, 2: ПІБ
         position = values[0].get("formattedValue", "")
         rank = values[1].get("formattedValue", "")
         name = values[2].get("formattedValue", "")
         if not name:
             continue
 
-        if col_idx < len(values):
-            cell = values[col_idx]
-            parsed = parse_cell(cell)
-            records.append({
-                "position": position,
-                "rank": rank,
-                "name": name,
-                **parsed
-            })
+        cell = values[col_idx] if col_idx < len(values) else {}
+        text = cell.get("formattedValue", "") if cell else ""
+        parsed = parse_doc_from_text(text)
+
+        records.append({
+            "position": position,
+            "rank": rank,
+            "name": name,
+            "raw": text,
+            **parsed
+        })
 
     return pd.DataFrame(records)
 
@@ -268,7 +254,7 @@ def main():
     docs_service = build("docs", "v1", credentials=creds)
 
     # 2) Зчитуємо таблицю (один раз на весь батч)
-    sheet = fetch_sheet_with_colors(sheets_service, SPREADSHEET_ID, RANGE)
+    sheet = fetch_sheet(sheets_service, SPREADSHEET_ID, RANGE)
     rows = sheet["sheets"][0]["data"][0]["rowData"]
 
     # 3) Парсимо строки дат
@@ -278,19 +264,19 @@ def main():
     for cur_date in daterange(start_date, end_date):
         target_str = cur_date.strftime("%d.%m.%Y")
 
-        # 3.1) формуємо DF для поточної дати (можете використати df далі для логіки/перевірок)
+        # 3.1) формуємо DF для поточної дати
         df = build_dataframe_for_date(rows, target_str)
         print(f"\n=== {target_str} ===")
         if df.empty:
             print("  У заголовку такої дати немає — пропускаю.")
             continue
         else:
-            print(df[["position", "rank", "name", "raw", "color_name"]])#.head())
+            print(df[["position", "rank", "name", "raw"]])
 
         # 3.2) створюємо документ і наповнюємо
         title = cur_date.strftime("%Y-%m-%d")
         doc_id = create_doc(drive_service, docs_service, FOLDER_ID, title)
-        
+
         file_list = build_file_list_for_date(cur_date)
         print(f"Файли для {target_str}: {file_list}")  # опціонально, для контролю
 
@@ -298,7 +284,7 @@ def main():
             docs_service=docs_service,
             doc_id=doc_id,
             target=cur_date,
-            file_list=file_list, #FILE_LIST,
+            file_list=file_list,
             odr_idx=ODR_IDX
         )
 
