@@ -1,10 +1,6 @@
-# Python
-__pycache__/
-*.pyc
-
-# Google OAuth
 token.json
 OAuth.json
-
-# Secrets / local files
-*.env
+__pycache__/
+*.pyc
+.venv/
+.env

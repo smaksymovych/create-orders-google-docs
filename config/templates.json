@@ -1,0 +1,44 @@
+{
+  "static_replacements": {
+    "{{UNIT_NAME}}": "В/ч А4056",
+    "{{POSITION}}": "Командир 9 єгерської роти 3 єгерського батальйону",
+    "{{RANK}}": "капітан",
+    "{{COMMANDER}}": "Сергій МАКСИМОВИЧ"
+  },
+  "duty_officer": {
+    "first_pair_duty_officer": "Черговий КСП: офіцер (1,4,7,...)",
+    "second_pair_duty_officer": "Черговий КСП: офіцер (2,5,8,...)",
+    "third_pair_duty_officer": "Черговий КСП: офіцер (3,6,9,...)"
+  },
+  "duty_driver": {
+    "first_duty_driver": "Черговий водій (1,3,5,...)",
+    "second_duty_driver": "Черговий водій (2,4,6,...)"
+  },
+  "duty_soldiers": [
+    "Рядовий Іваненко І.І.",
+    "Сержант Петренко П.П."
+  ],
+  "duty_cars": [
+    {
+      "route": "Маршрут 1 (звідки → куди)",
+      "car_make": "Toyota Hilux",
+      "car_plate": "АА1234КМ",
+      "drivers": [
+        "Іваненко І.І.",
+        "Петренко П.П."
+      ],
+      "radio_number": "R-12",
+      "purpose": "Доставка документів"
+    },
+    {
+      "route": "Маршрут 2 (…)",
+      "car_make": "Ford Ranger",
+      "car_plate": "АА5678КМ",
+      "drivers": [
+        "Сидоренко С.С."
+      ],
+      "radio_number": "R-07",
+      "purpose": "Патрулювання"
+    }
+  ]
+}
