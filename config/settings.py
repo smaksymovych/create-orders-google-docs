@@ -27,7 +27,7 @@ TEMPLATE_DOC_ID = "18kjR_6IWczUerivTqTk8kyMjbg_bE48nyQ_cniIT_IQ"
 
 # ================== DATE RANGE (inclusive) ==================
 START_DATE_STR = "01.01.2026"
-END_DATE_STR = "04.01.2026"
+END_DATE_STR = "03.01.2026"
 
 # ================== OTHER ==================
 ODR_IDX = "434дск"

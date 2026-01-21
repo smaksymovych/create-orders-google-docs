@@ -3,7 +3,7 @@ from __future__ import print_function
 import json
 import os
 from datetime import datetime, timedelta, date
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -103,11 +103,9 @@ def build_duty_soldiers_text(data: Dict[str, Any]) -> str:
     soldiers = data.get("duty_soldiers", [])
     if not soldiers:
         return ""
-    # Accept list[str] or list[dict]
     lines = ["Чергові солдати:"]
     for item in soldiers:
         if isinstance(item, dict):
-            # you can extend schema freely: rank/name/notes etc
             name = item.get("name") or item.get("full_name") or ""
             rank = item.get("rank") or ""
             notes = item.get("notes") or ""
@@ -124,38 +122,82 @@ def build_duty_soldiers_text(data: Dict[str, Any]) -> str:
 
 
 def build_duty_cars_text(data: Dict[str, Any]) -> str:
-    cars = data.get("duty_cars", [])
-    if not cars:
+    duty = data.get("duty_cars", [])
+    if not duty:
         return ""
 
-    lines = ["Чергові автомобілі:"]
-    for idx, car in enumerate(cars, start=1):
-        if not isinstance(car, dict):
-            s = str(car).strip()
-            if s:
-                lines.append(f"\n{idx}. {s}")
+    drivers = data.get("drivers_catalog", {})
+    routes = data.get("routes_catalog", {})
+    purposes = data.get("purposes_catalog", {})
+    radios = data.get("radios_catalog", {})
+
+    cars_list = data.get("cars_catalog", [])
+    cars_by_id = {
+        c.get("car_id"): c
+        for c in cars_list
+        if isinstance(c, dict) and c.get("car_id")
+    }
+
+    def driver_name(driver_id: str) -> str:
+        return drivers.get(driver_id, driver_id)
+
+    def route_text(route_id: str) -> str:
+        return routes.get(route_id, route_id)
+
+    def radio_text(radio_id: str) -> str:
+        return radios.get(radio_id, radio_id)
+
+    def purpose_text(item: dict) -> str:
+        ptxt = (item.get("purpose_text") or "").strip()
+        if ptxt:
+            return ptxt
+        pid = item.get("purpose_id")
+        return purposes.get(pid, pid) if pid else ""
+
+    lines: List[str] = ["Чергові автомобілі:"]
+
+    for idx, item in enumerate(duty, start=1):
+        if not isinstance(item, dict):
             continue
 
-        route = (car.get("route") or "").strip()
-        make = (car.get("car_make") or "").strip()
-        plate = (car.get("car_plate") or "").strip()
-        drivers = car.get("drivers") or []
-        radio = (car.get("radio_number") or "").strip()
-        purpose = (car.get("purpose") or "").strip()
+        car_id = item.get("car_id", "")
+        car = cars_by_id.get(car_id, {})
 
-        drivers_str = ", ".join([str(d).strip() for d in drivers if str(d).strip()]) if isinstance(drivers, list) else str(drivers).strip()
+        model = (car.get("model") or "").strip()
+        plate = (car.get("plate") or "").strip()
 
-        lines.append(f"\n{idx}.")
-        if route:
-            lines.append(f"Маршрут: {route}")
-        if make or plate:
-            lines.append(f"Авто: {make} {plate}".strip())
-        if drivers_str:
-            lines.append(f"Водії: {drivers_str}")
+        main_driver = driver_name(car.get("main_driver_id", ""))
+        reserve_ids = car.get("reserve_driver_ids", []) or []
+        reserve_drivers = [driver_name(x) for x in reserve_ids if x]
+        reserve_str = ", ".join(reserve_drivers)
+
+        radio = radio_text(car.get("radio_id", ""))
+
+        rid = item.get("route_id")
+        rids = item.get("route_ids")
+        if rids and isinstance(rids, list):
+            route_str = "; ".join(route_text(x) for x in rids if x)
+        elif rid:
+            route_str = route_text(rid)
+        else:
+            defaults = car.get("default_route_ids", []) or []
+            route_str = "; ".join(route_text(x) for x in defaults if x)
+
+        purpose = purpose_text(item)
+
+        lines.append(f"\n{idx}. {car_id}")
+        if route_str:
+            lines.append(f"Маршрут: {route_str}")
+        if model or plate:
+            lines.append(f"Авто: {model} {plate}".strip())
+        if main_driver:
+            lines.append(f"Основний водій: {main_driver}")
+        if reserve_str:
+            lines.append(f"Запасні водії: {reserve_str}")
         if radio:
-            lines.append(f"Номер рації: {radio}")
+            lines.append(f"Рація: {radio}")
         if purpose:
-            lines.append(f"Ціль поїздки: {purpose}")
+            lines.append(f"Ціль: {purpose}")
 
     return "\n".join(lines).strip()
 
