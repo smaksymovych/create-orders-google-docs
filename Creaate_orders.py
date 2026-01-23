@@ -185,22 +185,24 @@ def build_duty_cars_text(data: Dict[str, Any]) -> str:
 
         purpose = purpose_text(item)
 
-        lines.append(f"\n{idx}. {car_id}")
+        parts = [f"{idx}) "]  # <-- без \n тут, бо новий рядок дасть join(lines)
+
         if route_str:
-            lines.append(f"Маршрут: {route_str}")
+            parts.append(f"{route_str} ")
         if model or plate:
-            lines.append(f"Авто: {model} {plate}".strip())
+            parts.append(f"т/з {model} з реєстраційним номером {plate} ".strip() + " ")
         if main_driver:
-            lines.append(f"Основний водій: {main_driver}")
+            parts.append(f"(основний водій - {main_driver}; ")
         if reserve_str:
-            lines.append(f"Запасні водії: {reserve_str}")
+            parts.append(f"запасні водії: {reserve_str}; ")
         if radio:
-            lines.append(f"Рація: {radio}")
+            parts.append(f"радіостанція - {radio}) ")
         if purpose:
-            lines.append(f"Ціль: {purpose}")
+            parts.append(f"{purpose}.")
 
-    return "\n".join(lines).strip()
+        lines.append("".join(parts).strip())
 
+    return "\n\n".join(lines).strip()
 
 # ================== DOC ==================
 def create_doc_from_template(drive_service, template_id: str, folder_id: str, title: str) -> str:

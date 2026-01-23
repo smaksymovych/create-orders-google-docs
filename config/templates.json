@@ -50,7 +50,7 @@
       ],
       "radio_id": "RAD_1",
       "default_route_ids": [
-        "R1"
+        "R2"
       ]
     },
     {
@@ -64,10 +64,10 @@
       ],
       "radio_id": "RAD_2",
       "default_route_ids": [
-        "R2"
+        "R1"
       ]
     },
-        {
+    {
       "car_id": "CAR_3",
       "model": "Mitsubishi L200",
       "plate": "1821Н9",
@@ -77,6 +77,62 @@
         "DRV_2"
       ],
       "radio_id": "RAD_2",
+      "default_route_ids": [
+        "R2"
+      ]
+    },
+    {
+      "car_id": "CAR_4",
+      "model": "Nissan Navara",
+      "plate": "2057Н9",
+      "main_driver_id": "DRV_1",
+      "reserve_driver_ids": [
+        "DRV_2",
+        "DRV_3"
+      ],
+      "radio_id": "RAD_2",
+      "default_route_ids": [
+        "R2"
+      ]
+    },
+    {
+      "car_id": "CAR_5",
+      "model": "КАМАЗ-5320",
+      "plate": "6922Е1",
+      "main_driver_id": "DRV_2",
+      "reserve_driver_ids": [
+        "DRV_3",
+        "DRV_1"
+      ],
+      "radio_id": "RAD_3",
+      "default_route_ids": [
+        "R2"
+      ]
+    },
+    {
+      "car_id": "CAR_6",
+      "model": "Ford Ranger",
+      "plate": "2447Н9",
+      "main_driver_id": "DRV_3",
+      "reserve_driver_ids": [
+        "DRV_1",
+        "DRV_2"
+      ],
+      "radio_id": "RAD_2",
+      "default_route_ids": [
+        "R1"
+      ]
+    },
+    {
+      "car_id": "CAR_7",
+      "model": "ВОЛЬСВАГЕН",
+      "plate": "3129Н2",
+      "main_driver_id": "DRV_2",
+      "reserve_driver_ids": [
+        "DRV_1",
+        "DRV_3"
+      ],
+      "radio_id": "RAD_3",
       "default_route_ids": [
         "R2"
       ]
@@ -90,13 +146,33 @@
     },
     {
       "car_id": "CAR_2",
+      "route_id": "R1",
+      "purpose_id": "P1"
+    },
+        {
+      "car_id": "CAR_3",
+      "route_id": "R3",
+      "purpose_id": "P1"
+    },
+            {
+      "car_id": "CAR_4",
+      "route_id": "R1",
+      "purpose_id": "P2"
+    },
+            {
+      "car_id": "CAR_5",
       "route_id": "R2",
       "purpose_id": "P2"
     },
-        {
-      "car_id": "CAR_2",
+            {
+      "car_id": "CAR_6",
+      "route_id": "R1",
+      "purpose_id": "P1"
+    },
+            {
+      "car_id": "CAR_7",
       "route_id": "R2",
-      "purpose_id": "P2"
+      "purpose_id": "P3"
     }
   ]
 }
