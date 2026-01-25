@@ -1,5 +1,6 @@
 token.json
 OAuth.json
+app.log
 __pycache__/
 *.pyc
 .venv/

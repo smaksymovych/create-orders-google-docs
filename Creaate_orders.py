@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import json
 import os
+import logging
 from datetime import datetime, timedelta, date
 from typing import Dict, Any, Optional, List
 
@@ -10,7 +11,31 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
+import re
+
 from config import settings as config
+
+
+# ================== LOGGING ==================
+logger = logging.getLogger("create_orders")
+
+
+def setup_logging() -> None:
+    level_name = getattr(config, "LOG_LEVEL", "INFO")
+    level = getattr(logging, level_name.upper(), logging.INFO)
+
+    handlers: List[logging.Handler] = [logging.StreamHandler()]
+    log_file = (getattr(config, "LOG_FILE", "") or "").strip()
+    if log_file:
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        handlers=handlers,
+    )
+
+    logger.info("Logging initialized: level=%s file=%s", level_name, log_file or "(disabled)")
 
 
 # ================== AUTH ==================
@@ -98,6 +123,117 @@ def apply_replacements(docs_service, doc_id: str, repl: Dict[str, str]) -> None:
         ).execute()
 
 
+# ================== SHEETS (ROUTES BY DATE) ==================
+def norm_plate(s: str) -> str:
+    """
+    "1234Н9 ", " 1234Н9 ", "1234 Н9 " -> "1234Н9"
+    """
+    if not s:
+        return ""
+    s = re.sub(r"\s+", "", str(s))  # прибрати ВСІ пробіли
+    return s.strip().upper()
+
+
+def load_sheet_routes_for_date(
+    sheets_service,
+    spreadsheet_id: str,
+    plate_tab_names: List[str],
+    cur_date: date
+) -> Dict[str, str]:
+    """Return {plate_tab_name: route_text} for cars that have departure date in column D.
+
+    - Each car tab is named by plate, e.g. '1761Н9'
+    - Column D contains 'Дата' values as TEXT in format 'DD.MM' (e.g. '25.12')
+    - Data starts from row config.SHEETS_DATA_START_ROW (inclusive)
+    - Column AB contains the route text; it can be merged, so rows may be empty.
+      In that case we use the last non-empty value above (last_route).
+    """
+    target = cur_date.strftime("%d.%m")
+    start_row = getattr(config, "SHEETS_DATA_START_ROW", 25)
+
+    logger.info("Sheets route lookup: date=%s (target='%s'), start_row=%s", cur_date.isoformat(), target, start_row)
+
+    # 1) Get existing tabs (titles) once
+    meta = sheets_service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(title))"
+    ).execute()
+
+    titles = [sh["properties"]["title"] for sh in meta.get("sheets", [])]
+
+    # мапа: нормалізована назва -> оригінальна назва вкладки
+    norm_to_original = {norm_plate(t): t for t in titles}
+    logger.debug("Tabs original: %s", titles)
+    logger.debug("Tabs normalized: %s", sorted(norm_to_original.keys()))
+
+    existing_tabs_raw = [sh["properties"]["title"] for sh in meta.get("sheets", [])]
+    existing_tabs = {norm_plate(t) for t in existing_tabs_raw}
+
+    logger.debug("Spreadsheet tabs found: %s", sorted(existing_tabs_raw))
+    logger.info("Plates from JSON: %d | Existing tabs: %d", len(plate_tab_names), len(existing_tabs))
+
+    routes_by_plate: Dict[str, str] = {}
+
+    for plate in plate_tab_names:
+        plate_norm = norm_plate(plate)
+        if not plate_norm:
+            continue
+
+        if plate_norm not in existing_tabs:
+            logger.debug("SKIP plate=%s (no tab with this name)", plate_norm)
+            continue
+
+        # Tab title is exactly the plate (no extra text)
+        # tab_title = plate_norm
+        # rng = f"'{tab_title}'!D{start_row}:AB"
+        # logger.debug("Read range %s", rng)
+
+        tab_title = norm_to_original.get(plate_norm)
+        if not tab_title:
+            logger.debug("SKIP: no tab for plate_norm=%s", plate_norm)
+            continue
+        rng = f"'{tab_title}'!D{start_row}:AB"
+        logger.debug("Read range=%s", rng)
+
+        resp = sheets_service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=rng
+        ).execute()
+
+        values = resp.get("values", [])
+        logger.debug("Tab %s: rows fetched=%d", tab_title, len(values))
+        if not values:
+            continue
+
+        last_route = ""
+        matched = False
+
+        for offset, row in enumerate(values):
+            # Actual sheet row number (approx) for logging:
+            row_num = start_row + offset
+
+            date_cell = str(row[0]).strip() if len(row) > 0 else ""
+            route_cell = str(row[24]).strip() if len(row) > 24 else ""  # AB relative to D
+
+            if route_cell:
+                last_route = route_cell
+
+            if date_cell.lower() == "дата":
+                continue
+
+            if date_cell == target:
+                chosen = route_cell or last_route
+                routes_by_plate[plate_norm] = chosen
+                matched = True
+                logger.info("MATCH plate=%s row=%d date='%s' route='%s'", plate_norm, row_num, date_cell, chosen)
+                break
+
+        if not matched:
+            logger.debug("NO MATCH plate=%s for date='%s'", plate_norm, target)
+
+    logger.info("Routes matched total: %d", len(routes_by_plate))
+    return routes_by_plate
+
 # ================== BLOCK BUILDERS ==================
 def build_duty_soldiers_text(data: Dict[str, Any]) -> str:
     soldiers = data.get("duty_soldiers", [])
@@ -121,33 +257,75 @@ def build_duty_soldiers_text(data: Dict[str, Any]) -> str:
     return "\n".join(lines).strip()
 
 
-def build_duty_cars_text(data: Dict[str, Any]) -> str:
-    duty = data.get("duty_cars", [])
-    if not duty:
-        return ""
+def build_duty_cars_text(data: Dict[str, Any], cur_date: date, sheets_service) -> str:
+    """Build cars block using:
+    - static data from templates.json (cars_catalog, drivers_catalog, radios_catalog, purposes_catalog, routes_catalog)
+    - dynamic route presence from Google Sheets (per-car tab named by PLATE, column D 'Дата' == DD.MM)
 
+    Car is included ONLY if its PLATE tab contains the date in column D.
+    Route:
+      - from column AB if present (merged-safe)
+      - otherwise fallback to car.default_route_ids via routes_catalog
+    Purpose:
+      - taken from templates.json duty_cars mapping by car_id (purpose_id) if present
+    """
     drivers = data.get("drivers_catalog", {})
-    routes = data.get("routes_catalog", {})
+    routes_catalog = data.get("routes_catalog", {})
     purposes = data.get("purposes_catalog", {})
     radios = data.get("radios_catalog", {})
 
-    cars_list = data.get("cars_catalog", [])
-    cars_by_id = {
-        c.get("car_id"): c
-        for c in cars_list
-        if isinstance(c, dict) and c.get("car_id")
-    }
+    cars_list = data.get("cars_catalog", []) or []
+    if not cars_list:
+        logger.warning("cars_catalog is empty in templates.json; nothing to build")
+        return ""
+
+    # Build maps:
+    # - plate_norm -> car dict
+    # - plate_norm -> car_id
+    cars_by_plate: Dict[str, Dict[str, Any]] = {}
+    car_id_by_plate: Dict[str, str] = {}
+    for c in cars_list:
+        if not isinstance(c, dict):
+            continue
+        plate = norm_plate(c.get("plate", ""))
+        car_id = c.get("car_id", "")
+        if plate and car_id:
+            cars_by_plate[plate] = c
+            car_id_by_plate[plate] = car_id
+        else:
+            logger.debug("SKIP car in JSON (missing plate or car_id): %s", c)
+
+    # Purpose mapping stays in JSON (existing structure)
+    duty_map: Dict[str, Dict[str, Any]] = {}
+    for it in data.get("duty_cars", []) or []:
+        if isinstance(it, dict) and it.get("car_id"):
+            duty_map[it["car_id"]] = it
+
+    # Only look for tabs that are listed in JSON (by plate)
+    plate_tab_names = list(cars_by_plate.keys())
+
+    routes_by_plate = load_sheet_routes_for_date(
+        sheets_service=sheets_service,
+        spreadsheet_id=config.SPREADSHEET_ID,
+        plate_tab_names=plate_tab_names,
+        cur_date=cur_date,
+    )
+
+    if not routes_by_plate:
+        logger.warning("No cars matched in Sheets for date=%s (target=%s)", cur_date.isoformat(), cur_date.strftime("%d.%m"))
+        return ""
 
     def driver_name(driver_id: str) -> str:
         return drivers.get(driver_id, driver_id)
 
     def route_text(route_id: str) -> str:
-        return routes.get(route_id, route_id)
+        return routes_catalog.get(route_id, route_id)
 
     def radio_text(radio_id: str) -> str:
         return radios.get(radio_id, radio_id)
 
-    def purpose_text(item: dict) -> str:
+    def purpose_text_by_car_id(car_id: str) -> str:
+        item = duty_map.get(car_id, {})
         ptxt = (item.get("purpose_text") or "").strip()
         if ptxt:
             return ptxt
@@ -156,53 +334,59 @@ def build_duty_cars_text(data: Dict[str, Any]) -> str:
 
     lines: List[str] = ["Чергові автомобілі:"]
 
-    for idx, item in enumerate(duty, start=1):
-        if not isinstance(item, dict):
-            continue
-
-        car_id = item.get("car_id", "")
-        car = cars_by_id.get(car_id, {})
+    # Stable order: by plate (sorted), or keep original JSON order if you prefer.
+    for idx, plate_norm in enumerate(sorted(routes_by_plate.keys()), start=1):
+        car = cars_by_plate.get(plate_norm, {})
+        car_id = car_id_by_plate.get(plate_norm, "")
 
         model = (car.get("model") or "").strip()
-        plate = (car.get("plate") or "").strip()
+        plate_display = (car.get("plate") or plate_norm).strip()
 
         main_driver = driver_name(car.get("main_driver_id", ""))
         reserve_ids = car.get("reserve_driver_ids", []) or []
-        reserve_drivers = [driver_name(x) for x in reserve_ids if x]
-        reserve_str = ", ".join(reserve_drivers)
+        reserve_str = ", ".join(driver_name(x) for x in reserve_ids if x)
 
         radio = radio_text(car.get("radio_id", ""))
 
-        rid = item.get("route_id")
-        rids = item.get("route_ids")
-        if rids and isinstance(rids, list):
-            route_str = "; ".join(route_text(x) for x in rids if x)
-        elif rid:
-            route_str = route_text(rid)
-        else:
+        # Route from sheet; fallback to defaults if empty
+        route_str = (routes_by_plate.get(plate_norm) or "").strip()
+        if not route_str:
             defaults = car.get("default_route_ids", []) or []
-            route_str = "; ".join(route_text(x) for x in defaults if x)
+            route_str = "; ".join(route_text(rid) for rid in defaults if rid)
+            logger.warning("Empty route in sheet for plate=%s (car_id=%s) -> fallback to defaults='%s'", plate_norm, car_id, route_str)
+        else:
+            logger.debug("Route from sheet used: plate=%s (car_id=%s) route='%s'", plate_norm, car_id, route_str)
 
-        purpose = purpose_text(item)
+        purpose = purpose_text_by_car_id(car_id) if car_id else ""
 
-        parts = [f"{idx}) "]  # <-- без \n тут, бо новий рядок дасть join(lines)
+        # 1 iteration = 1 line
+        parts: List[str] = [f"{idx}) "]
 
         if route_str:
-            parts.append(f"{route_str} ")
-        if model or plate:
-            parts.append(f"т/з {model} з реєстраційним номером {plate} ".strip() + " ")
+            parts.append(route_str)
+
+        if model or plate_display:
+            parts.append(f"т/з {model} з реєстраційним номером {plate_display}".strip())
+
+        # Put driver/radio into one bracketed chunk (avoids unclosed brackets)
+        meta: List[str] = []
         if main_driver:
-            parts.append(f"(основний водій - {main_driver}; ")
+            meta.append(f"основний водій - {main_driver}")
         if reserve_str:
-            parts.append(f"запасні водії: {reserve_str}; ")
+            meta.append(f"запасні водії: {reserve_str}")
         if radio:
-            parts.append(f"радіостанція - {radio}) ")
+            meta.append(f"радіостанція - {radio}")
+        if meta:
+            parts.append(f"({'; '.join(meta)})")
+
         if purpose:
             parts.append(f"{purpose}.")
 
-        lines.append("".join(parts).strip())
+        line = " ".join(parts).strip()
+        logger.debug("CAR LINE: %s", line)
+        lines.append(line)
 
-    return "\n\n".join(lines).strip()
+    return "\n".join(lines).strip()
 
 # ================== DOC ==================
 def create_doc_from_template(drive_service, template_id: str, folder_id: str, title: str) -> str:
@@ -237,12 +421,14 @@ def apply_document_default_style(docs_service, doc_id: str, font: str, size_pt: 
 
 # ================== MAIN ==================
 def main():
+    setup_logging()
     if config.FOLDER_ID.startswith("PASTE_") or config.TEMPLATE_DOC_ID.startswith("PASTE_"):
         raise ValueError("Set FOLDER_ID and TEMPLATE_DOC_ID in config/settings.py")
 
     creds = get_oauth_creds()
     drive_service = build("drive", "v3", credentials=creds)
     docs_service = build("docs", "v1", credentials=creds)
+    sheets_service = build("sheets", "v4", credentials=creds)
 
     templates = load_templates_json(config.TEMPLATES_JSON_PATH)
 
@@ -271,7 +457,7 @@ def main():
             "{{DUTY_KSP_BLOCK}}": build_duty_officer_text(cur_date, templates),
             "{{DUTY_DRIVE_BLOCK}}": build_duty_driver_text(cur_date, templates),
             "{{DUTY_SOLDIERS}}": build_duty_soldiers_text(templates),
-            "{{DUTY_CARS_BLOCK}}": build_duty_cars_text(templates),
+            "{{DUTY_CARS_BLOCK}}": build_duty_cars_text(templates, cur_date, sheets_service),
         }
         apply_replacements(docs_service, doc_id, blocks)
 
