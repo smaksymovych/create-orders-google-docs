@@ -69,6 +69,8 @@ def load_templates_json(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
+def parse_spreadsheet_ids(raw: str) -> List[str]:
+    return [x.strip() for x in (raw or "").split(",") if x.strip()]
 
 # ================== DUTY LOGIC ==================
 def build_duty_officer_text(cur_date: date, data: Dict[str, Any]) -> str:
@@ -133,12 +135,52 @@ def norm_plate(s: str) -> str:
     s = re.sub(r"\s+", "", str(s))  # прибрати ВСІ пробіли
     return s.strip().upper()
 
+def load_routes_for_date_from_many(
+    sheets_service,
+    spreadsheet_ids: List[str],
+    plate_tab_names: List[str],
+    cur_date: date,
+    start_row: int,
+) -> Dict[str, str]:
+    """
+    Шукає виїзди по списку spreadsheets по черзі.
+    Як тільки для plate знайдено дату/маршрут — далі spreadsheets для цієї plate не перевіряємо.
+    Повертає {plate_norm: route_text}.
+    """
+    routes_by_plate: Dict[str, str] = {}
+    pending = list(plate_tab_names)  # які plate ще не знайдені
+
+    for sid in spreadsheet_ids:
+        if not pending:
+            break
+
+        logger.info("Checking spreadsheet: %s (pending plates: %d)", sid, len(pending))
+
+        found_here = load_sheet_routes_for_date(
+            sheets_service=sheets_service,
+            spreadsheet_id=sid,
+            plate_tab_names=pending,
+            cur_date=cur_date,
+            start_row=start_row,
+        )
+
+        # merge: тільки те, що ще не було знайдено
+        for plate_norm, route in found_here.items():
+            if plate_norm not in routes_by_plate:
+                routes_by_plate[plate_norm] = route
+
+        # оновити pending
+        found_set = set(found_here.keys())
+        pending = [p for p in pending if norm_plate(p) not in found_set]
+
+    return routes_by_plate
 
 def load_sheet_routes_for_date(
     sheets_service,
     spreadsheet_id: str,
     plate_tab_names: List[str],
-    cur_date: date
+    cur_date: date,
+    start_row: int,
 ) -> Dict[str, str]:
     """Return {plate_tab_name: route_text} for cars that have departure date in column D.
 
@@ -304,11 +346,23 @@ def build_duty_cars_text(data: Dict[str, Any], cur_date: date, sheets_service) -
     # Only look for tabs that are listed in JSON (by plate)
     plate_tab_names = list(cars_by_plate.keys())
 
-    routes_by_plate = load_sheet_routes_for_date(
+    # routes_by_plate = load_sheet_routes_for_date(
+    #     sheets_service=sheets_service,
+    #     spreadsheet_id=config.SPREADSHEET_ID,
+    #     plate_tab_names=plate_tab_names,
+    #     cur_date=cur_date,
+    # )
+
+    spreadsheet_ids = parse_spreadsheet_ids(getattr(config, "SPREADSHEET_IDS", ""))
+    if not spreadsheet_ids:
+        raise ValueError("Set SPREADSHEET_IDS in config/settings.py")
+
+    routes_by_plate = load_routes_for_date_from_many(
         sheets_service=sheets_service,
-        spreadsheet_id=config.SPREADSHEET_ID,
+        spreadsheet_ids=spreadsheet_ids,
         plate_tab_names=plate_tab_names,
         cur_date=cur_date,
+        start_row=config.SHEETS_DATA_START_ROW,
     )
 
     if not routes_by_plate:
