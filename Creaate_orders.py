@@ -191,18 +191,28 @@ def load_sheet_routes_for_date(
     cur_date: date,
     start_row: int,
 ) -> Dict[str, str]:
-    """Return {plate_tab_name: route_text} for cars that have departure date in column D.
+    """
+    Повертає маршрути з одного шляхового листа (spreadsheet) для заданої дати.
 
-    - Each car tab is named by plate, e.g. '1761Н9'
-    - Column D contains 'Дата' values as TEXT in format 'DD.MM' (e.g. '25.12')
-    - Data starts from row config.SHEETS_DATA_START_ROW (inclusive)
-    - Column AB contains the route text; it can be merged, so rows may be empty.
-      In that case we use the last non-empty value above (last_route).
+    ВАЖЛИВО:
+    - Вкладка = номер авто (plate). Назви вкладок можуть містити пробіли, тому
+      ми порівнюємо за нормалізованими значеннями, але в range використовуємо
+      ОРИГІНАЛЬНУ назву вкладки з metadata.
+    - Дату шукаємо в колонці D (текст 'DD.MM', інколи без нуля: '3.01').
+    - Маршрут беремо з колонки A (A може бути об'єднана з B по ширині — це нормально).
+    - Дані починаються з start_row (наприклад 25).
+    - Щоб уникнути зсуву індексів у Sheets API (коли порожні ліві комірки не повертаються),
+      читаємо колонки A і D ОКРЕМО через batchGet і синхронізуємо по рядку.
     """
     target = cur_date.strftime("%d.%m")
-    start_row = getattr(config, "SHEETS_DATA_START_ROW", 25)
-
-    logger.info("Sheets route lookup: date=%s (target='%s'), start_row=%s", cur_date.isoformat(), target, start_row)
+    logger.info(
+        "Sheets route lookup: spreadsheet=%s date=%s (target='%s') start_row=%s plates=%d",
+        spreadsheet_id,
+        cur_date.isoformat(),
+        target,
+        start_row,
+        len(plate_tab_names),
+    )
 
     # 1) Get existing tabs (titles) once
     meta = sheets_service.spreadsheets().get(
@@ -211,79 +221,92 @@ def load_sheet_routes_for_date(
     ).execute()
 
     titles = [sh["properties"]["title"] for sh in meta.get("sheets", [])]
-
-    # мапа: нормалізована назва -> оригінальна назва вкладки
     norm_to_original = {norm_plate(t): t for t in titles}
-    logger.debug("Tabs original: %s", titles)
-    logger.debug("Tabs normalized: %s", sorted(norm_to_original.keys()))
 
-    existing_tabs_raw = [sh["properties"]["title"] for sh in meta.get("sheets", [])]
-    existing_tabs = {norm_plate(t) for t in existing_tabs_raw}
-
-    logger.debug("Spreadsheet tabs found: %s", sorted(existing_tabs_raw))
-    logger.info("Plates from JSON: %d | Existing tabs: %d", len(plate_tab_names), len(existing_tabs))
+    logger.debug("Spreadsheet tabs (original): %s", titles)
+    logger.debug("Spreadsheet tabs (normalized): %s", sorted(norm_to_original.keys()))
 
     routes_by_plate: Dict[str, str] = {}
 
     for plate in plate_tab_names:
         plate_norm = norm_plate(plate)
         if not plate_norm:
-            continue
-
-        if plate_norm not in existing_tabs:
-            logger.debug("SKIP plate=%s (no tab with this name)", plate_norm)
+            logger.debug("SKIP: empty plate value: %r", plate)
             continue
 
         tab_title = norm_to_original.get(plate_norm)
         if not tab_title:
-            logger.debug("SKIP: no tab for plate_norm=%s", plate_norm)
+            logger.debug("SKIP: no tab for plate=%r (norm=%s) in spreadsheet=%s", plate, plate_norm, spreadsheet_id)
             continue
-        # rng = f"'{tab_title}'!D{start_row}:AB"
-        rng = f"'{tab_title}'!A{start_row}:D"
-        logger.debug("Read range=%s", rng)
 
-        resp = sheets_service.spreadsheets().values().get(
+        # Read ONLY columns A and D starting from start_row to avoid index shifting
+        ranges = [
+            f"'{tab_title}'!A{start_row}:A",
+            f"'{tab_title}'!D{start_row}:D",
+        ]
+        logger.debug("Read (batchGet) tab=%r ranges=%s", tab_title, ranges)
+
+        resp = sheets_service.spreadsheets().values().batchGet(
             spreadsheetId=spreadsheet_id,
-            range=rng
+            ranges=ranges,
         ).execute()
 
-        values = resp.get("values", [])
-        logger.debug("Tab %s: rows fetched=%d", tab_title, len(values))
-        if not values:
-            continue
+        vr = resp.get("valueRanges", [])
+        col_a = vr[0].get("values", []) if len(vr) > 0 else []
+        col_d = vr[1].get("values", []) if len(vr) > 1 else []
 
-        last_route = ""
+        logger.debug(
+            "Fetched tab=%r rows: A=%d D=%d (start_row=%d)",
+            tab_title,
+            len(col_a),
+            len(col_d),
+            start_row,
+        )
+
+        max_len = max(len(col_a), len(col_d))
         matched = False
 
-        for offset, row in enumerate(values):
-            # Actual sheet row number (approx) for logging:
-            row_num = start_row + offset
+        # For debugging, log the first few rows we see
+        preview_n = min(5, max_len)
+        for i in range(preview_n):
+            row_num = start_row + i
+            a_val = str(col_a[i][0]).strip() if i < len(col_a) and col_a[i] else ""
+            d_val = str(col_d[i][0]).strip() if i < len(col_d) and col_d[i] else ""
+            logger.debug("Preview tab=%r row=%d A(route)=%r D(date)=%r", tab_title, row_num, a_val, d_val)
 
-            # date_cell = str(row[0]).strip() if len(row) > 0 else ""
-            # route_cell = str(row[24]).strip() if len(row) > 24 else ""  # AB relative to D
-            route_cell = str(row[0]).strip() if len(row) > 0 else ""   # A (маршрут)
-            date_cell  = str(row[3]).strip() if len(row) > 3 else ""   # D (дата)
+        for i in range(max_len):
+            row_num = start_row + i
 
-            if route_cell:
-                last_route = route_cell
+            route_cell = str(col_a[i][0]).strip() if i < len(col_a) and col_a[i] else ""
+            date_cell = str(col_d[i][0]).strip() if i < len(col_d) and col_d[i] else ""
 
             if date_cell.lower() == "дата":
                 continue
 
             if norm_ddmm(date_cell) == target:
-                chosen = route_cell or last_route
-                routes_by_plate[plate_norm] = chosen
+                # Якщо маршрут порожній у рядку з датою — вважаємо, що в шляховому листі маршруту немає,
+                # і повертаємо порожній рядок, щоб вище спрацював fallback на default_route_ids з JSON.
+                if route_cell:
+                    routes_by_plate[plate_norm] = route_cell
+                    logger.info(
+                        "MATCH plate=%s tab=%r row=%d date=%r route(from sheet)=%r",
+                        plate_norm, tab_title, row_num, date_cell, route_cell
+                    )
+                else:
+                    routes_by_plate[plate_norm] = ""
+                    logger.warning(
+                        "MATCH plate=%s tab=%r row=%d date=%r but route is EMPTY in column A -> will fallback to JSON defaults",
+                        plate_norm, tab_title, row_num, date_cell
+                    )
                 matched = True
-                logger.info("MATCH plate=%s row=%d date='%s' route='%s'", plate_norm, row_num, date_cell, chosen)
                 break
 
         if not matched:
-            logger.debug("NO MATCH plate=%s for date='%s'", plate_norm, target)
+            logger.debug("NO MATCH plate=%s in tab=%r for date target=%s", plate_norm, tab_title, target)
 
-    logger.info("Routes matched total: %d", len(routes_by_plate))
+    logger.info("Routes matched total in spreadsheet=%s: %d", spreadsheet_id, len(routes_by_plate))
     return routes_by_plate
 
-# ================== BLOCK BUILDERS ==================
 def build_duty_soldiers_text(data: Dict[str, Any]) -> str:
     soldiers = data.get("duty_soldiers", [])
     if not soldiers:

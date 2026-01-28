@@ -25,7 +25,7 @@
   },
   "routes_catalog": {
     "R1": "НП РОСІШКИ - НП КРАСНОГОРІВКА  - НП РОСІШКИ",
-    "R2": "НП РОСІШКИИИИИ - НП КРИВОРІЖЖЯ - НП ГРИШИНЕ - НП РОСІШКИ",
+    "R2": "НП РОСІШКИ - НП КРИВОРІЖЖЯ - НП ГРИШИНЕ - НП РОСІШКИ",
     "R3": "НП РОСІШКИ - НП ШАХТАРСЬКЕ - НП ЗАПОРІЖЖЯ - НП РОСІШКИ"
   },
   "purposes_catalog": {
@@ -125,7 +125,7 @@
     },
     {
       "car_id": "CAR_7",
-      "model": "Volksvagen PICK-UP T-4",
+      "model": "ВОЛЬСВАГЕН",
       "plate": "3129Н2",
       "main_driver_id": "DRV_2",
       "reserve_driver_ids": [
@@ -149,27 +149,27 @@
       "route_id": "R1",
       "purpose_id": "P1"
     },
-    {
+        {
       "car_id": "CAR_3",
       "route_id": "R3",
       "purpose_id": "P1"
     },
-    {
+            {
       "car_id": "CAR_4",
       "route_id": "R1",
       "purpose_id": "P2"
     },
-    {
+            {
       "car_id": "CAR_5",
       "route_id": "R2",
       "purpose_id": "P2"
     },
-    {
+            {
       "car_id": "CAR_6",
       "route_id": "R1",
       "purpose_id": "P1"
     },
-    {
+            {
       "car_id": "CAR_7",
       "route_id": "R2",
       "purpose_id": "P3"
