@@ -108,6 +108,15 @@ def normalize_inline_replacements(repl: Dict[str, str]) -> Dict[str, str]:
     return {k: str(v).replace("\n", " ").strip() for k, v in repl.items()}
 
 
+# ================== SHEETS (NORMALIZE DATE) ==================
+# 03.01 == 3.01
+def norm_ddmm(s: str) -> str:
+    s = (s or "").strip()
+    m = re.match(r"^(\d{1,2})\.(\d{1,2})", s)
+    if not m:
+        return ""
+    return f"{m.group(1).zfill(2)}.{m.group(2).zfill(2)}"
+
 def apply_replacements(docs_service, doc_id: str, repl: Dict[str, str]) -> None:
     requests = []
     for k, v in repl.items():
@@ -225,16 +234,12 @@ def load_sheet_routes_for_date(
             logger.debug("SKIP plate=%s (no tab with this name)", plate_norm)
             continue
 
-        # Tab title is exactly the plate (no extra text)
-        # tab_title = plate_norm
-        # rng = f"'{tab_title}'!D{start_row}:AB"
-        # logger.debug("Read range %s", rng)
-
         tab_title = norm_to_original.get(plate_norm)
         if not tab_title:
             logger.debug("SKIP: no tab for plate_norm=%s", plate_norm)
             continue
-        rng = f"'{tab_title}'!D{start_row}:AB"
+        # rng = f"'{tab_title}'!D{start_row}:AB"
+        rng = f"'{tab_title}'!A{start_row}:D"
         logger.debug("Read range=%s", rng)
 
         resp = sheets_service.spreadsheets().values().get(
@@ -254,8 +259,10 @@ def load_sheet_routes_for_date(
             # Actual sheet row number (approx) for logging:
             row_num = start_row + offset
 
-            date_cell = str(row[0]).strip() if len(row) > 0 else ""
-            route_cell = str(row[24]).strip() if len(row) > 24 else ""  # AB relative to D
+            # date_cell = str(row[0]).strip() if len(row) > 0 else ""
+            # route_cell = str(row[24]).strip() if len(row) > 24 else ""  # AB relative to D
+            route_cell = str(row[0]).strip() if len(row) > 0 else ""   # A (маршрут)
+            date_cell  = str(row[3]).strip() if len(row) > 3 else ""   # D (дата)
 
             if route_cell:
                 last_route = route_cell
@@ -263,7 +270,7 @@ def load_sheet_routes_for_date(
             if date_cell.lower() == "дата":
                 continue
 
-            if date_cell == target:
+            if norm_ddmm(date_cell) == target:
                 chosen = route_cell or last_route
                 routes_by_plate[plate_norm] = chosen
                 matched = True

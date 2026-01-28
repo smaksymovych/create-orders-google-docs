@@ -28,15 +28,15 @@ TEMPLATE_DOC_ID = "18kjR_6IWczUerivTqTk8kyMjbg_bE48nyQ_cniIT_IQ"
 
 # Google Sheets file with car tabs and departure dates:
 # https://docs.google.com/spreadsheets/d/<SPREADSHEET_ID>/edit
-SPREADSHEET_IDS = "150IBYL5_B-9T_7WrZWSF2t7nFbE_epDpY_Fwio1WFXU, 1ftxRDv40W4EaHTVE6oqCqOe8g-Q4NUUcPzuvGOtttN8"
+SPREADSHEET_IDS = "150IBYL5_B-9T_7WrZWSF2t7nFbE_epDpY_Fwio1WFXU, 1ftxRDv40W4EaHTVE6oqCqOe8g-Q4NUUcPzuvGOtttN8, 1a1rtMO4aFN33QnWBPpEBqrjjHM6OlaoXGEjXr31WIEw"
 
 # In each car tab, data rows start from this row (inclusive).
 # Row 25 means the range should begin with D25.
 SHEETS_DATA_START_ROW = 26
 
 # ================== DATE RANGE (inclusive) ==================
-START_DATE_STR = "06.01.2026"
-END_DATE_STR = "07.01.2026"
+START_DATE_STR = "19.01.2026"
+END_DATE_STR = "19.01.2026"
 
 # ================== OTHER ==================
 ODR_IDX = "434дск"
